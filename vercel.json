@@ -1,22 +1,16 @@
 {
-    "version": 2,
-    "builds": [
+    "rewrites": [
         {
-            "src": "app.py",
-            "use": "@vercel/python"
+            "source": "/static/(.*)",
+            "destination": "/static/$1"
+        },
+        {
+            "source": "/(.*)",
+            "destination": "/api/index"
         }
     ],
-    "routes": [
-        {
-            "src": "/(.*)",
-            "dest": "app.py"
-        }
-    ],
-    "env": {
-        "FLASK_ENV": "production"
-    },
     "functions": {
-        "app.py": {
+        "api/index.py": {
             "maxDuration": 30
         }
     }
