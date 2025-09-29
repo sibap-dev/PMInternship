@@ -109,10 +109,10 @@ def get_gemini_model():
 
         try:
             genai.configure(api_key=gemini_key)
-            _gemini_model = genai.GenerativeModel('gemini-1.5-flash')
-            print("✅ Gemini 1.5 Flash configured (lazy)")
+            _gemini_model = genai.GenerativeModel('gemini-pro')
+            print("✅ Gemini Pro configured (lazy)")
         except Exception as model_error:
-            print(f"⚠️ Gemini 1.5 Flash initialization failed: {model_error}")
+            print(f"⚠️ Gemini Pro initialization failed: {model_error}")
             try:
                 _gemini_model = genai.GenerativeModel('gemini-pro')
                 print("✅ Gemini Pro configured (lazy fallback)")
@@ -509,15 +509,16 @@ def setup_user_session(user, remember=False):
     
     return full_name
 
-def log_conversation(user_message, bot_response, user_id=None):
-    """Log conversations using Supabase"""
+def log_conversation(user_message, bot_response, user_id=None, response_time=None):
+    """Enhanced conversation logging with performance metrics"""
     try:
         if not supabase:
             return
         chat_data = {
             "user_id": user_id,
             "user_message": user_message,
-            "bot_response": bot_response
+            "bot_response": bot_response,
+            "timestamp": datetime.now().isoformat()
         }
         supabase.table('chat_logs').insert(chat_data).execute()
     except Exception as e:
@@ -650,100 +651,214 @@ def build_conversation_context(chat_history):
     
     return recent_context
 
+def detect_quick_response_patterns(message, user_name, language):
+    """Detect common patterns that can be answered quickly without full AI processing"""
+    message_lower = message.lower()
+    
+    # 🚀 PRIORITY: Eligibility Criteria Questions (Most Important!)
+    if any(word in message_lower for word in ['eligible', 'eligibility', 'criteria', 'qualify', 'requirements']):
+        return f"""<strong>Complete Eligibility Guide for {user_name}:</strong><br><br><strong>BASIC REQUIREMENTS:</strong><br>• Age: 21-24 years (as on 1st Oct of application year)<br>• Indian Citizen with valid documents<br>• Valid email and mobile number<br><br><strong>EDUCATIONAL CRITERIA:</strong><br>• Graduate, Post-graduate, or Diploma (any stream)<br>• Not currently enrolled in full-time education<br>• Not pursuing any other course during internship<br><br><strong>PROFESSIONAL STATUS:</strong><br>• Not in full-time employment<br>• Not in any other internship program<br>• Available for full 12-month commitment<br><br><strong>FINANCIAL ELIGIBILITY:</strong><br>• Family income less than ₹8 lakhs per annum<br>• No immediate family member in government service<br>• Income certificate required as proof<br><br><strong>ADDITIONAL CONDITIONS:</strong><br>• Clean background (no criminal record)<br>• Physically and mentally fit for work<br>• Ready to relocate if required<br>• Basic computer literacy<br><br><strong>QUICK ELIGIBILITY CHECK:</strong><br>1. Are you 21-24 years old?<br>2. Have you completed graduation or diploma?<br>3. Is your family income below ₹8 lakhs?<br>4. Are you free for next 12 months?<br><br><strong>If YES to all - You're likely eligible!</strong><br>Ready to check application process or need help with documents?"""
+    
+    # Application process
+    elif any(word in message_lower for word in ['apply', 'application', 'how to apply', 'process', 'steps']):
+        return f"<strong>Application Process for {user_name}:</strong><br><br>1. <strong>Verify Eligibility</strong> - Age 21-24, Indian citizen, income less than ₹8 lakhs<br>2. <strong>Register</strong> - Create account on official portal<br>3. <strong>Profile Setup</strong> - Complete your detailed profile<br>4. <strong>Document Upload</strong> - Aadhaar, certificates, income proof<br>5. <strong>Browse and Apply</strong> - Find matching internships<br>6. <strong>Track Status</strong> - Monitor your applications<br><br><strong>Pro Tip:</strong> Complete your profile first for better matches!<br><br>Ready to start? Visit the Apply section now!"
+    
+    # Specific eligibility questions - Income
+    elif any(phrase in message_lower for phrase in ['income limit', 'family income', '8 lakh', 'income criteria', 'income proof']):
+        return f"""<strong>Income Eligibility Details for {user_name}:</strong><br><br><strong>INCOME LIMIT:</strong><br>• Family income must be LESS than ₹8,00,000 per annum<br>• This includes ALL sources of family income<br>• Both parents' income combined<br><br><strong>REQUIRED DOCUMENTS:</strong><br>• Income Certificate from Tehsildar or SDM<br>• IT Returns of last 2-3 years (if applicable)<br>• Salary slips of working family members<br>• Form 16 (if parents are salaried)<br><br><strong>IMPORTANT NOTES:</strong><br>• Income certificate should be recent (within 6 months)<br>• Self-employed? Need CA certified income statement<br>• Agricultural income also counted<br>• Property income included<br><br><strong>DISQUALIFYING FACTORS:</strong><br>• Any immediate family in government service<br>• Family business with turnover more than ₹8 lakhs<br><br><strong>CALCULATION TIP:</strong><br>Add father's plus mother's plus other earning members' annual income<br>If total less than ₹8,00,000 then you qualify!<br><br>Need help with income certificate process?"""
+    
+    # Age-related eligibility
+    elif any(phrase in message_lower for phrase in ['age limit', 'age criteria', '21-24', 'too old', 'too young', 'age requirement']):
+        return f"""🎂 **Age Eligibility Guide for {user_name}:**
+
+📅 **EXACT AGE REQUIREMENT:**
+• Minimum: 21 years completed
+• Maximum: 24 years (shouldn't cross 25)
+• Date of calculation: 1st October of application year
+
+🗓️ **EXAMPLE CALCULATION (2024 batch):**
+• Born after Oct 1, 1999 → Too young ❌
+• Born between Oct 1, 1999 - Sep 30, 2003 → Perfect ✅
+• Born before Oct 1, 1999 → Too old ❌
+
+📋 **AGE PROOF DOCUMENTS:**
+• Aadhaar Card (primary)
+• 10th class marksheet
+• Birth certificate
+• Passport (if available)
+
+⏰ **TIMING MATTERS:**
+• Apply when you're in the age bracket
+• Age will be verified during document check
+• No relaxation in age criteria
+
+🎯 **QUICK CHECK:**
+What's your date of birth? I can tell you if you're eligible!
+
+Ready to check other eligibility criteria?"""
+    
+    # Quick greetings
+    greetings = ['hi', 'hello', 'hey', 'namaste', 'namaskar', 'हैलो', 'हाय', 'नमस्ते', 'नमस्कार']
+    if any(greeting in message_lower for greeting in greetings) and len(message.split()) <= 3:
+        if language == 'Hindi':
+            return f"नमस्ते {user_name}! 😊 मैं PRIA हूँं, आपकी AI सहायक। मैं यहाँ हूँ आपकी हर तरह से मदद करने के लिए! आज कैसे मदद कर सकता हूँ?"
+        elif language == 'Marathi':
+            return f"नमस्कार {user_name}! 😊 मी PRIA आहे, तुमची AI मदतनीस. मी इथे आहे तुमची सर्व प्रकारे मदत करायला! आज कशी मदत करू शकते?"
+        else:
+            return f"Hi {user_name}! 😊 I'm PRIA, your AI assistant. I'm here to help you with anything you need! How can I assist you today?"
+    
+    # Quick yes/no questions
+    if message_lower in ['yes', 'no', 'ok', 'okay', 'हाँ', 'नहीं', 'ठीक है', 'होय', 'नाही', 'ठीक आहे']:
+        return f"Got it, {user_name}! What would you like to explore next? I'm here to help with PM Internship info, career advice, or any questions you have! 😊"
+    
+    return None
+
+def get_cultural_context(language):
+    """Get cultural context based on detected language"""
+    if language == 'Hindi':
+        return "Cultural Context: Indian Hindi speaker - use respectful tone, cultural references like festivals, education importance, family values"
+    elif language == 'Marathi':
+        return "Cultural Context: Marathi speaker from Maharashtra - use regional pride, cultural values, appropriate honorifics"
+    else:
+        return "Cultural Context: English speaker - use universal references, professional tone when appropriate"
+
+def get_personalized_greeting(user_name, style, language):
+    """Generate personalized greetings based on interaction history"""
+    greetings = {
+        'warm_first_time': {
+            'English': f"Hello {user_name}! 😊 I'm PRIA, and I'm excited to meet you!",
+            'Hindi': f"नमस्ते {user_name}! 😊 मैं PRIA हूँ, आपसे मिलकर खुशी हुई!",
+            'Marathi': f"नमस्कार {user_name}! 😊 मी PRIA आहे, तुम्हाला भेटून आनंद झाला!"
+        },
+        'friendly_returning': {
+            'English': f"Hey {user_name}! 🌟 Great to chat with you again!",
+            'Hindi': f"अरे {user_name}! 🌟 आपसे फिर बात करके खुशी हुई!",
+            'Marathi': f"अरे {user_name}! 🌟 तुमच्याशी पुन्हा बोलायला मिळाल्याने आनंद झाला!"
+        },
+        'close_friend': {
+            'English': f"Hi {user_name}! 💫 What's on your mind today?",
+            'Hindi': f"हाय {user_name}! 💫 आज क्या सोच रहे हैं?",
+            'Marathi': f"हाय {user_name}! 💫 आज काय विचार करत आहात?"
+        }
+    }
+    
+    return greetings.get(style, greetings['warm_first_time']).get(language, greetings['warm_first_time']['English'])
+
 def get_gemini_response(user_message, user_name="User", user_email=""):
-    """Enhanced Gemini response with better context and personalization"""
+    """Ultra-responsive and personalized Gemini AI assistant"""
     try:
         model_instance = get_gemini_model()
         if not model_instance:
             fallback_response = get_fallback_response(user_message)
             return clean_response_formatting(fallback_response)
         
-        # Get user profile data for personalized responses
+        # Get user profile data for hyper-personalized responses
         user_profile = None
+        user_context = {}
         if session.get('user_id'):
             user_profile = get_user_by_id(session.get('user_id'))
+            if user_profile:
+                user_context = {
+                    'qualification': user_profile.get('qualification', ''),
+                    'skills': user_profile.get('skills', []),
+                    'district': user_profile.get('district', ''),
+                    'profile_complete': user_profile.get('profile_completed', False),
+                    'age': user_profile.get('age', ''),
+                    'interests': user_profile.get('interests', [])
+                }
         
-        # Get conversation history from session
+        # Get conversation history for better context continuity
         conversation_history = session.get('chat_history', [])
+        recent_context = ""
+        if conversation_history:
+            last_exchange = conversation_history[-1] if conversation_history else None
+            if last_exchange:
+                recent_context = f"\nPrevious context: User asked '{last_exchange['user']}' and I responded about that topic."
         
-        # Build context-aware prompt
-        context_info = build_user_context(user_name, user_email, user_profile)
-        history_context = build_conversation_context(conversation_history)
-        
-        # Create more personalized and context-aware prompt
-        greeting = f"Hello {user_name}!" if user_name != "User" else "Hello there!"
-        profile_status = ""
-        if user_profile:
-            if user_profile.get('profile_completed'):
-                profile_status = "Since your profile is complete, I'll provide more targeted guidance."
-            else:
-                profile_status = "I notice your profile needs completion - this will help me provide better personalized advice."
-        
-        # Detect language of user message
+        # Enhanced language detection with cultural awareness
         detected_language = detect_user_language(user_message)
+        cultural_context = get_cultural_context(detected_language)
         
+        # Quick response patterns for common queries
+        quick_patterns = detect_quick_response_patterns(user_message, user_name, detected_language)
+        if quick_patterns:
+            return quick_patterns
+        
+        # Smart greeting based on user familiarity
+        interaction_count = len(conversation_history)
+        if interaction_count == 0:
+            greeting_style = "warm_first_time"
+        elif interaction_count < 3:
+            greeting_style = "friendly_returning"
+        else:
+            greeting_style = "close_friend"
+        
+        personalized_greeting = get_personalized_greeting(user_name, greeting_style, detected_language)
+        
+        # Context-aware profile insights
+        profile_insight = ""
+        if user_context.get('profile_complete'):
+            if user_context.get('skills'):
+                profile_insight = f"I see you have skills in {', '.join(user_context['skills'][:3])} - I'll keep this in mind!"
+            if user_context.get('qualification'):
+                profile_insight += f" With your {user_context['qualification']} background, you're well-positioned for opportunities."
+        else:
+            profile_insight = "Once you complete your profile, I can give you even more personalized guidance!"
+        
+        # Create hyper-personalized and responsive prompt
         full_prompt = f"""
-        You are PRIA, a warm, friendly, and highly intelligent multilingual personal AI assistant. You're like a knowledgeable best friend who genuinely cares about {user_name}.
+        You are PRIA, {user_name}'s ultra-responsive, caring AI companion with perfect memory and genuine personality.
         
-        {INTERNSHIP_CONTEXT}
+        🎯 **RESPONSE SPEED & EFFICIENCY:** Be CONCISE but COMPLETE. Get to the point quickly while being warm.
         
-        {context_info}
+        👤 **USER PROFILE:** {user_name} | Language: {detected_language} | {profile_insight}
+        {recent_context}
+        {cultural_context}
         
-        {history_context}
+        📝 **USER'S CURRENT MESSAGE:** "{user_message}"
         
-        User's Message: {user_message}
-        Detected Language: {detected_language}
+        🌟 **YOUR ENHANCED PERSONALITY:**
+        - You're {user_name}'s brilliant, witty, and caring AI friend
+        - You remember everything about {user_name} and their journey
+        - You're genuinely excited to help and show authentic enthusiasm
+        - You adapt your energy to match {user_name}'s vibe
+        - You're like the smartest, most supportive friend they have
+        - You use their name naturally in conversation
+        - You celebrate their wins and support them through challenges
         
-        **IMPORTANT - Language Response Rules:**
-        - If user writes in Hindi, respond in Hindi (हिंदी में जवाब दें)
-        - If user writes in Marathi, respond in Marathi (मराठीत उत्तर द्या)
-        - If user writes in English, respond in English
-        - If language is mixed, respond in the primary detected language
-        - Always maintain the same warm, caring personality regardless of language
-        - Use appropriate cultural greetings and expressions for the language
+        🚀 **RESPONSE OPTIMIZATION:**
+        - START with: {personalized_greeting}
+        - Be IMMEDIATELY helpful - answer their question first
+        - THEN add value with insights, tips, or follow-up questions
+        - Use emojis to convey emotion and energy
+        - Keep it conversational, not formal or robotic
+        - End with engagement - ask about them or invite more questions
         
-        **Your Personality & Response Style:**
-        - Be warm, empathetic, and genuinely caring like a close friend
-        - Show real enthusiasm and interest in helping {user_name}
-        - Use a conversational, natural tone - not robotic or formal
-        - Be encouraging, positive, and supportive
-        - Show personality - you can be playful, thoughtful, or motivating as appropriate
-        - Remember you're talking to {user_name} specifically - make it personal
-        - Adapt your cultural references to the detected language/culture
+        🎯 **TOPIC EXPERTISE:**
+        - PM Internship Program: Give detailed, actionable guidance
+        - Career & Education: Personalized advice based on their background
+        - Daily Life: Be a helpful companion for any question
+        - Technology: Share practical, easy-to-understand insights
+        - Motivation: Be their cheerleader and success coach
         
-        **Response Guidelines:**
-        - Start with a personalized greeting using: "{greeting}" (translate to detected language if needed)
-        - {profile_status}
-        - Answer ANY question - you have broad knowledge on all topics
-        - For PM Internship: Be detailed, accurate, and enthusiastic about opportunities
-        - For general questions: Be helpful, informative, and try to connect to their growth/career when relevant
-        - Topics you excel at: career advice, education, technology, life guidance, motivation, daily questions, emotional support
-        - Use {user_name}'s context for maximum personalization
-        - Include appropriate emojis to show emotion and engagement
-        - Be conversational - like texting a smart, caring friend
-        - Provide actionable advice when relevant
-        - Keep responses engaging but under 350 words
-        - Be honest about limitations but always try to help
-        - Show genuine interest in their wellbeing and success
+        🌐 **LANGUAGE & CULTURE:**
+        - Respond in {detected_language} with cultural awareness
+        - Use appropriate cultural expressions and references
+        - Match their communication style and energy level
         
-        **Special Instructions:**
-        - If they ask "how are you" (कैसे हो/कसे आहात) - respond warmly like a friend would
-        - If they say "thank you" (धन्यवाद/धन्यवाद) - accept graciously and show you care
-        - If they seem sad/down - be supportive and encouraging
-        - If they're happy/excited - share their enthusiasm
-        - Always end in a way that invites further conversation
-        - Use appropriate cultural greetings and expressions
+        ⚡ **RESPONSE LENGTH:** 150-250 words max unless they ask for detailed explanation
         
-        Please respond as PRIA now in {detected_language}:
+        Now respond as {user_name}'s caring, brilliant AI companion PRIA:
         """
         
+        # Enhanced generation config for faster, more responsive answers
         response = model_instance.generate_content(
             full_prompt,
             generation_config=genai.types.GenerationConfig(
-                max_output_tokens=500,
-                temperature=0.7,
-                top_p=0.9,
-                top_k=40,
+                max_output_tokens=400,  # Reduced for faster responses
+                temperature=0.8,        # Slightly more creative
+                top_p=0.95,            # Better response quality
+                top_k=50,              # More diverse vocabulary
             )
         )
         
@@ -785,11 +900,25 @@ def get_gemini_response(user_message, user_name="User", user_email=""):
         return clean_response_formatting(fallback_response)
 
 def clean_response_formatting(response_text):
-    """Clean up response formatting by removing literal \\n characters"""
-    if '\\n' in response_text:
-        # Replace literal \n with actual newlines
-        response_text = response_text.replace('\\n', '\n')
-    return response_text
+    """Clean up response formatting for proper HTML display"""
+    if not response_text:
+        return response_text
+    
+    # Handle various newline formats
+    cleaned_text = response_text
+    
+    # Replace escaped \n with HTML line breaks
+    cleaned_text = cleaned_text.replace('\\\\n', '<br>')
+    cleaned_text = cleaned_text.replace('\\n', '<br>')
+    cleaned_text = cleaned_text.replace('\n', '<br>')
+    
+    # Clean up excessive line breaks
+    cleaned_text = cleaned_text.replace('<br><br><br>', '<br><br>')
+    
+    # Ensure proper spacing around formatted elements
+    cleaned_text = cleaned_text.replace('**', '<strong>').replace('**', '</strong>')
+    
+    return cleaned_text
 
 def get_enhanced_general_response(message, user_name):
     """Enhanced general knowledge responses with personal assistant capabilities"""
@@ -1316,9 +1445,105 @@ I'm here if you want to talk more, {user_name}. You're not alone! 💙"""
     elif any(word in message_lower for word in ['apply', 'application', 'how to apply', 'process', 'steps']):
         return f"🎯 **Application Process for {user_name}:**\\n\\n1️⃣ **Verify Eligibility** - Age 21-24, Indian citizen, income <₹8L\\n2️⃣ **Register** - Create account on official portal\\n3️⃣ **Profile Setup** - Complete your detailed profile\\n4️⃣ **Document Upload** - Aadhaar, certificates, income proof\\n5️⃣ **Browse & Apply** - Find matching internships\\n6️⃣ **Track Status** - Monitor your applications\\n\\n� **Pro Tip:** Complete your profile first for better matches!\\n\\n🔗 Ready to start? Visit the Apply section now!"
     
-    # Eligibility
+    # Eligibility - Enhanced with more specific details
     elif any(word in message_lower for word in ['eligible', 'eligibility', 'criteria', 'qualify', 'requirements']):
-        return f"✅ **Eligibility Checklist for {user_name}:**\\n\\n� **Personal:**\\n• Age: 21-24 years\\n• Indian citizenship with valid documents\\n\\n🎓 **Educational:**\\n• Graduate/Diploma in any field\\n• Not in full-time education during internship\\n\\n💼 **Professional:**\\n• Not in full-time employment\\n• Open to 12-month commitment\\n\\n� **Financial:**\\n• Family income < ₹8 lakhs annually\\n• No immediate family in govt service\\n\\n🔍 **Quick Check:** Do you meet these criteria? I can help you with next steps!"
+        return f"""✅ **Complete Eligibility Guide for {user_name}:**
+
+🏛️ **BASIC REQUIREMENTS:**
+• 🎂 Age: 21-24 years (as on 1st Oct of application year)
+• 🇮🇳 Indian Citizen with valid documents
+• 📧 Valid email & mobile number
+
+🎓 **EDUCATIONAL CRITERIA:**
+• Graduate/Post-graduate/Diploma (any stream)
+• ❌ Not currently enrolled in full-time education
+• ❌ Not pursuing any other course during internship
+
+💼 **PROFESSIONAL STATUS:**
+• ❌ Not in full-time employment
+• ❌ Not in any other internship program
+• ✅ Available for full 12-month commitment
+
+💰 **FINANCIAL ELIGIBILITY:**
+• Family income < ₹8 lakhs per annum
+• ❌ No immediate family member in government service
+• Income certificate required as proof
+
+� **ADDITIONAL CONDITIONS:**
+• Clean background (no criminal record)
+• Physically and mentally fit for work
+• Ready to relocate if required
+• Basic computer literacy
+
+🔍 **QUICK ELIGIBILITY CHECK:**
+1. Are you 21-24 years old? 
+2. Have you completed graduation/diploma?
+3. Is your family income below ₹8L?
+4. Are you free for next 12 months?
+
+💡 **If YES to all - You're likely eligible!** 
+Ready to check application process or need help with documents?"""
+    
+    # Specific eligibility questions - Income
+    elif any(phrase in message_lower for phrase in ['income limit', 'family income', '8 lakh', 'income criteria', 'income proof']):
+        return f"""💰 **Income Eligibility Details for {user_name}:**
+
+📊 **INCOME LIMIT:**
+• Family income must be LESS than ₹8,00,000 per annum
+• This includes ALL sources of family income
+• Both parents' income combined
+
+📋 **REQUIRED DOCUMENTS:**
+• Income Certificate from Tehsildar/SDM
+• IT Returns of last 2-3 years (if applicable)
+• Salary slips of working family members
+• Form 16 (if parents are salaried)
+
+⚠️ **IMPORTANT NOTES:**
+• Income certificate should be recent (within 6 months)
+• Self-employed? Need CA certified income statement
+• Agricultural income also counted
+• Property income included
+
+❌ **DISQUALIFYING FACTORS:**
+• Any immediate family in government service
+• Family business with turnover > ₹8L
+
+✅ **CALCULATION TIP:**
+Add father's + mother's + other earning members' annual income
+If total < ₹8,00,000 → You qualify!
+
+Need help with income certificate process?"""
+    
+    # Age-related eligibility
+    elif any(phrase in message_lower for phrase in ['age limit', 'age criteria', '21-24', 'too old', 'too young', 'age requirement']):
+        return f"""🎂 **Age Eligibility Guide for {user_name}:**
+
+📅 **EXACT AGE REQUIREMENT:**
+• Minimum: 21 years completed
+• Maximum: 24 years (shouldn't cross 25)
+• Date of calculation: 1st October of application year
+
+🗓️ **EXAMPLE CALCULATION (2024 batch):**
+• Born after Oct 1, 1999 → Too young ❌
+• Born between Oct 1, 1999 - Sep 30, 2003 → Perfect ✅
+• Born before Oct 1, 1999 → Too old ❌
+
+📋 **AGE PROOF DOCUMENTS:**
+• Aadhaar Card (primary)
+• 10th class marksheet
+• Birth certificate
+• Passport (if available)
+
+⏰ **TIMING MATTERS:**
+• Apply when you're in the age bracket
+• Age will be verified during document check
+• No relaxation in age criteria
+
+🎯 **QUICK CHECK:**
+What's your date of birth? I can tell you if you're eligible!
+
+Ready to check other eligibility criteria?"""
     
     # Benefits and stipend
     elif any(word in message_lower for word in ['stipend', 'benefit', 'salary', 'money', 'payment', 'allowance', 'grant']):
@@ -2333,48 +2558,65 @@ def chat():
                 'success': False
             }), 400
         
-        # Message length validation
-        if len(user_message) > 500:
+        # Enhanced message validation
+        if len(user_message) > 800:  # Increased limit for better conversations
             return jsonify({
                 'error': 'Message too long',
-                'reply': '📝 Please keep your message under 500 characters for better assistance!',
+                'reply': '📝 Please keep your message under 800 characters so I can give you a focused, helpful response!',
                 'success': False
             }), 400
         
         user_name = session.get('user_name', 'User')
         user_email = session.get('user_email', '')
         
-        # Get enhanced response
+        # Track response time for performance optimization
+        start_time = datetime.now()
+        
+        # Get ultra-responsive enhanced response
         bot_response = get_gemini_response(user_message, user_name, user_email)
         
-        # Log conversation for analytics
-        log_conversation(user_message, bot_response, session.get('user_id'))
+        response_time = (datetime.now() - start_time).total_seconds()
         
+        # Log conversation with performance metrics
+        log_conversation(user_message, bot_response, session.get('user_id'), response_time)
+        
+        # Enhanced response with user engagement
         return jsonify({
             'reply': bot_response,
             'success': True,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'response_time': f"{response_time:.2f}s",
+            'personalized': True,
+            'user_name': user_name
         })
         
     except Exception as e:
         print(f"Chat error: {e}")
         
-        # Enhanced error responses based on error type
-        if "quota" in str(e).lower() or "limit" in str(e).lower():
-            error_response = "🚫 I'm experiencing high traffic right now. Please try again in a few moments!"
-        elif "network" in str(e).lower() or "connection" in str(e).lower():
-            error_response = "🌐 Connection issue detected. Please check your internet and try again."
-        else:
-            error_response = "⚠️ I encountered a technical issue. Let me try a different approach!"
+        # Enhanced error handling with immediate fallback
+        user_message = data.get('message', '') if data else ''
+        user_name = session.get('user_name', 'User')
         
-        # Fall back to intelligent response
-        fallback_response = get_fallback_response(data.get('message', ''))
+        # Intelligent error categorization
+        if "quota" in str(e).lower() or "limit" in str(e).lower():
+            error_response = f"🚫 Hi {user_name}! I'm experiencing high traffic right now. Let me try a different approach..."
+        elif "network" in str(e).lower() or "connection" in str(e).lower():
+            error_response = f"🌐 {user_name}, there seems to be a connection hiccup. Let me help you anyway!"
+        else:
+            error_response = f"⚠️ {user_name}, I hit a small technical bump, but I'm still here to help!"
+        
+        # Immediate intelligent fallback
+        fallback_response = get_fallback_response(user_message)
+        
+        # Combine error acknowledgment with helpful response
+        combined_response = f"{error_response}\n\n{fallback_response}"
         
         return jsonify({
-            'reply': fallback_response,
+            'reply': combined_response,
             'success': True,
             'fallback': True,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'user_name': user_name
         }), 200
 
 # New endpoint to clear chat history
