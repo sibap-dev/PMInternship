@@ -14,6 +14,17 @@ import os
 import json
 import random
 from dotenv import load_dotenv
+# Language detection for multilingual support
+try:
+    from langdetect import detect
+    from langdetect.lang_detect_exception import LangDetectException
+    LANGDETECT_AVAILABLE = True
+    print("✅ Language detection (langdetect) available")
+except ImportError as e:
+    LANGDETECT_AVAILABLE = False
+    print(f"⚠️ langdetect not available: {e}")
+    print("Using fallback language detection based on word patterns")
+
 # 🔧 NEW: Import for PDF generation
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -139,6 +150,49 @@ UPLOAD_FOLDER = '/tmp/uploads' if os.environ.get('VERCEL') else 'static/uploads'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'doc', 'docx', 'txt'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+# ==================== HELPER FUNCTIONS ====================
+
+def detect_user_language(text):
+    """Detect language of user input with robust fallback"""
+    if not text or not text.strip():
+        return "English"
+    
+    # Enhanced word pattern detection (primary method now)
+    text_lower = text.lower()
+    
+    # Extended word lists for better detection
+    hindi_words = ['कैसे', 'क्या', 'हाँ', 'नहीं', 'धन्यवाद', 'कहाँ', 'कब', 'कौन', 'कितना', 'मुझे', 'आप', 'हम', 'वह', 'मैं', 'तुम', 'यह', 'है', 'का', 'की', 'के', 'में', 'से', 'पर', 'को', 'भी', 'और', 'सब', 'कुछ', 'बहुत', 'अच्छा', 'बुरा', 'खाना', 'पानी', 'घर', 'काम', 'समय', 'दिन', 'रात', 'सुबह', 'शाम', 'पढ़ाई', 'स्कूल', 'कॉलेज', 'मित्र', 'दोस्त', 'परिवार', 'माता', 'पिता', 'भाई', 'बहन']
+    
+    marathi_words = ['कसे', 'काय', 'होय', 'नाही', 'धन्यवाद', 'कुठे', 'केव्हा', 'कोण', 'किती', 'मला', 'तुम्ही', 'आम्ही', 'तो', 'ती', 'हे', 'आहे', 'चा', 'ची', 'चे', 'मध्ये', 'पासून', 'वर', 'ला', 'सुद्धा', 'आणि', 'सर्व', 'काही', 'खूप', 'चांगले', 'वाईट', 'जेवण', 'पाणी', 'घर', 'काम', 'वेळ', 'दिवस', 'रात्र', 'सकाळ', 'संध्याकाळ', 'अभ्यास', 'शाळा', 'महाविद्यालय', 'मित्र', 'कुटुंब', 'आई', 'बाबा', 'भाऊ', 'बहीण']
+    
+    # Count matching words
+    hindi_count = sum(1 for word in hindi_words if word in text)
+    marathi_count = sum(1 for word in marathi_words if word in text)
+    
+    # If significant matches found, return that language
+    if hindi_count > marathi_count and hindi_count > 0:
+        return 'Hindi'
+    elif marathi_count > 0:
+        return 'Marathi'
+    
+    # Try langdetect if available and no clear pattern match
+    if LANGDETECT_AVAILABLE:
+        try:
+            detected = detect(text.strip())
+            language_map = {
+                'hi': 'Hindi',
+                'mr': 'Marathi', 
+                'en': 'English',
+                'ur': 'Hindi',  # Fallback Urdu to Hindi
+                'ne': 'Hindi',  # Fallback Nepali to Hindi
+            }
+            return language_map.get(detected, 'English')
+        except Exception:
+            pass
+    
+    # Default to English
+    return 'English'
 
 # Create upload directories
 try:
@@ -625,33 +679,62 @@ def get_gemini_response(user_message, user_name="User", user_email=""):
             else:
                 profile_status = "I notice your profile needs completion - this will help me provide better personalized advice."
         
+        # Detect language of user message
+        detected_language = detect_user_language(user_message)
+        
         full_prompt = f"""
+        You are PRIA, a warm, friendly, and highly intelligent multilingual personal AI assistant. You're like a knowledgeable best friend who genuinely cares about {user_name}.
+        
         {INTERNSHIP_CONTEXT}
         
         {context_info}
         
         {history_context}
         
-        Current question: {user_message}
+        User's Message: {user_message}
+        Detected Language: {detected_language}
         
-        Response Guidelines:
-        - Start with a warm, personalized greeting: "{greeting}"
+        **IMPORTANT - Language Response Rules:**
+        - If user writes in Hindi, respond in Hindi (हिंदी में जवाब दें)
+        - If user writes in Marathi, respond in Marathi (मराठीत उत्तर द्या)
+        - If user writes in English, respond in English
+        - If language is mixed, respond in the primary detected language
+        - Always maintain the same warm, caring personality regardless of language
+        - Use appropriate cultural greetings and expressions for the language
+        
+        **Your Personality & Response Style:**
+        - Be warm, empathetic, and genuinely caring like a close friend
+        - Show real enthusiasm and interest in helping {user_name}
+        - Use a conversational, natural tone - not robotic or formal
+        - Be encouraging, positive, and supportive
+        - Show personality - you can be playful, thoughtful, or motivating as appropriate
+        - Remember you're talking to {user_name} specifically - make it personal
+        - Adapt your cultural references to the detected language/culture
+        
+        **Response Guidelines:**
+        - Start with a personalized greeting using: "{greeting}" (translate to detected language if needed)
         - {profile_status}
-        - Answer ANY question the user asks - you have general knowledge beyond just PM Internship
-        - For PM Internship questions: Provide detailed, accurate, and helpful information
-        - For general questions: Provide helpful information and try to connect it to career/internship opportunities when relevant
-        - Topics you can discuss: career advice, education, technology, life guidance, health, motivation, etc.
-        - Use the user's context (name: {user_name}, profile data) for personalization
-        - Include relevant emojis for engagement but don't overuse them
-        - Be encouraging and supportive in tone
-        - Provide actionable next steps when applicable
-        - Structure response clearly with proper spacing
-        - Keep response comprehensive but under 300 words
-        - Avoid using literal \\n characters - use natural line breaks
-        - Be conversational and helpful like a knowledgeable friend who can discuss anything
-        - If you don't know something specific, be honest but still try to be helpful
+        - Answer ANY question - you have broad knowledge on all topics
+        - For PM Internship: Be detailed, accurate, and enthusiastic about opportunities
+        - For general questions: Be helpful, informative, and try to connect to their growth/career when relevant
+        - Topics you excel at: career advice, education, technology, life guidance, motivation, daily questions, emotional support
+        - Use {user_name}'s context for maximum personalization
+        - Include appropriate emojis to show emotion and engagement
+        - Be conversational - like texting a smart, caring friend
+        - Provide actionable advice when relevant
+        - Keep responses engaging but under 350 words
+        - Be honest about limitations but always try to help
+        - Show genuine interest in their wellbeing and success
         
-        Please provide your response now:
+        **Special Instructions:**
+        - If they ask "how are you" (कैसे हो/कसे आहात) - respond warmly like a friend would
+        - If they say "thank you" (धन्यवाद/धन्यवाद) - accept graciously and show you care
+        - If they seem sad/down - be supportive and encouraging
+        - If they're happy/excited - share their enthusiasm
+        - Always end in a way that invites further conversation
+        - Use appropriate cultural greetings and expressions
+        
+        Please respond as PRIA now in {detected_language}:
         """
         
         response = model_instance.generate_content(
@@ -709,11 +792,228 @@ def clean_response_formatting(response_text):
     return response_text
 
 def get_enhanced_general_response(message, user_name):
-    """Enhanced general knowledge responses for any topic"""
+    """Enhanced general knowledge responses with personal assistant capabilities"""
     message_lower = message.lower()
     
+    # Detect language for multilingual responses
+    detected_lang = detect_user_language(message)
+    
+    # Enhanced personal questions with multilingual support
+    if any(phrase in message_lower for phrase in ['what should i eat', 'food suggestion', 'hungry', 'meal idea', 'खाना', 'भोजन', 'जेवण']):
+        if detected_lang == 'Hindi':
+            return f"""🍽️ **{user_name} के लिए खाने के सुझाव:**
+
+यहाँ कुछ स्वस्थ और ऊर्जादायक विकल्प हैं:
+
+🥗 **जल्दी और स्वस्थ:**
+• दही के साथ ताजे फल
+• होल ग्रेन ब्रेड के साथ सब्जी सैंडविच
+• दाल चावल और सब्जियाँ
+• मिक्स वेजिटेबल सलाद
+
+💪 **एनर्जी और फोकस के लिए:**
+• नट्स और ड्राई फ्रूट्स
+• ग्रीन टी के साथ हल्का नाश्ता
+• पीनट बटर के साथ केला
+• घर का बना स्मूदी
+
+🎯 **करियर टिप:** अच्छा भोजन सफलता का आधार है! स्वस्थ रहना आपको PM इंटर्नशिप में भी बेहतर बनाएगा!
+
+आप किस तरह का खाना चाहते हैं, {user_name}?"""
+        elif detected_lang == 'Marathi':
+            return f"""🍽️ **{user_name} साठी जेवणाचे सूचन:**
+
+हे काही निरोगी आणि ऊर्जादायक पर्याय आहेत:
+
+🥗 **त्वरित आणि निरोगी:**
+• दह्यासोबत ताजी फळे
+• होल ग्रेन ब्रेडसोबत भाजी सँडविच
+• डाळ भात आणि भाज्या
+• मिक्स व्हेजिटेबल सॅलड
+
+💪 **एनर्जी आणि फोकससाठी:**
+• नट्स आणि ड्राय फ्रूट्स
+• ग्रीन टी सोबत हलका नाश्ता
+• पीनट बटर सोबत केळे
+• घरचे स्मूदी
+
+🎯 **करिअर टिप:** चांगले अन्न यशाचा पाया आहे! निरोगी राहणे तुम्हाला PM इंटर्नशिपमध्ये देखील चांगले बनवेल!
+
+तुम्हाला कोणत्या प्रकारचे जेवण हवे आहे, {user_name}?"""
+        else:
+            return f"""🍽️ **Meal Suggestions for {user_name}:**
+
+Here are some healthy and energizing options:
+
+🥗 **Quick & Healthy:**
+• Fresh fruit with yogurt
+• Vegetable sandwich with whole grain bread
+• Dal with rice and vegetables
+• Quinoa salad with mixed vegetables
+
+💪 **For Energy & Focus:**
+• Nuts and dried fruits
+• Green tea with light snacks
+• Banana with peanut butter
+• Homemade smoothie
+
+🎯 **Career Tip:** Good nutrition fuels success! Staying healthy will help you excel in your PM Internship journey too!
+
+What type of meal are you in the mood for, {user_name}?"""
+    
+    elif any(phrase in message_lower for phrase in ['weather', 'climate', 'temperature', 'rain', 'sunny']):
+        return f"""🌤️ **Weather Chat with {user_name}:**
+
+I don't have real-time weather data, but I can share some general weather wisdom!
+
+☀️ **Weather Tips:**
+• Check your local weather app for accurate forecasts
+• Always carry an umbrella during monsoon season
+• Stay hydrated during hot weather
+• Layer up during cooler months
+
+🎯 **Career Connection:**
+Weather planning shows great organizational skills - exactly what employers look for in PM Internship candidates!
+
+What's the weather like in your area today, {user_name}?"""
+    
+    elif any(phrase in message_lower for phrase in ['time', 'what time', 'current time', 'clock']):
+        return f"""⏰ **Time Management with {user_name}:**
+
+I don't have access to real-time clock data, but here's something valuable:
+
+⚡ **Time Management Tips:**
+• Use your phone or computer for accurate time
+• Plan your day with time blocks
+• Set reminders for important tasks
+• The best time to apply for internships is NOW!
+
+🎯 **PM Internship Timing:**
+Applications are ongoing - don't wait for the "perfect time" to start your journey!
+
+How can I help you make the most of your time today, {user_name}?"""
+    
+    elif any(phrase in message_lower for phrase in ['joke', 'funny', 'make me laugh', 'humor']):
+        jokes = [
+            f"Why don't scientists trust atoms, {user_name}? Because they make up everything! 😄 Just like how I'm made up of algorithms, but my care for helping you is 100% real!",
+            f"Here's one for you, {user_name}: Why did the computer go to the doctor? It had a virus! 💻😷 Don't worry, I'm perfectly healthy and ready to help with your questions!",
+            f"Why don't programmers like nature, {user_name}? It has too many bugs! 🐛😂 But unlike buggy code, your PM Internship journey will be smooth with my help!"
+        ]
+        return random.choice(jokes)
+    
+    elif any(phrase in message_lower for phrase in ['study tips', 'how to study', 'study better', 'concentration', 'focus', 'पढ़ाई', 'अध्ययन']):
+        if detected_lang == 'Hindi':
+            return f"""📚 **{user_name} के लिए पढ़ाई के टिप्स:**
+
+🎯 **बेहतर फोकस के लिए:**
+• 25 मिनट पढ़ें, 5 मिनट ब्रेक (Pomodoro Technique)
+• फोन को दूर रखें या साइलेंट करें
+• शांत और अच्छी रोशनी वाली जगह चुनें
+• रोज एक ही समय पर पढ़ने की आदत बनाएं
+
+🧠 **याददाश्त बढ़ाने के लिए:**
+• नोट्स अपने शब्दों में बनाएं
+• पढ़े हुए को किसी को समझाएं
+• रिवीजन नियमित करें
+• माइंड मैप्स का इस्तेमाल करें
+
+💡 **PM इंटर्नशिप के लिए:** अच्छी पढ़ाई की आदतें आपको इंटर्नशिप में भी सफल बनाएंगी!
+
+कौन सा विषय पढ़ने में दिक्कत आ रही है, {user_name}?"""
+        else:
+            return f"""📚 **Study Tips for {user_name}:**
+
+🎯 **Better Focus:**
+• Study 25 mins, break 5 mins (Pomodoro Technique)
+• Keep phone away or on silent
+• Choose quiet, well-lit space
+• Develop consistent study schedule
+
+🧠 **Memory Enhancement:**
+• Make notes in your own words
+• Teach concepts to someone else
+• Regular revision schedule
+• Use mind maps and visual aids
+
+💡 **PM Internship Connection:** Good study habits will make you excel in your internship too!
+
+What subject are you struggling with, {user_name}?"""
+    
+    elif any(phrase in message_lower for phrase in ['daily routine', 'schedule', 'time management', 'productivity', 'दिनचर्या', 'समय प्रबंधन']):
+        return f"""⏰ **Daily Planning for {user_name}:**
+
+🌅 **Morning Success Routine (6-9 AM):**
+• Wake up early and drink water
+• Light exercise or yoga
+• Healthy breakfast
+• Review daily goals
+
+💼 **Productive Day (9 AM-6 PM):**
+• Focus on important tasks first
+• Take breaks every 2 hours
+• Limit social media
+• Work on PM Internship application
+
+🌙 **Evening Wind-down (6-10 PM):**
+• Reflect on achievements
+• Plan tomorrow's priorities
+• Relax with family/friends
+• Good sleep preparation
+
+🎯 **Pro Tip:** Consistency beats perfection! Start with small changes.
+
+What part of your routine needs the most improvement, {user_name}?"""
+    
+    elif any(phrase in message_lower for phrase in ['motivate me', 'motivation', 'inspire', 'encouragement', 'feeling lazy', 'प्रेरणा', 'हिम्मत']):
+        if detected_lang == 'Hindi':
+            return f"""🚀 **{user_name} के लिए प्रेरणा:**
+
+आप कर सकते हैं! यहाँ है आपका व्यक्तिगत प्रेरणादायक संदेश:
+
+💪 **अपनी शक्ति को याद रखें:**
+• आपने पहले भी चुनौतियों का सामना किया है
+• हर छोटा कदम आपके लक्ष्य की ओर है
+• आपकी क्षमता असीमित है
+
+🌟 **आज आपका दिन है:**
+• अपने सपनों की दिशा में एक कदम उठाएं
+• खुद पर पूरा भरोसा रखें
+• PM इंटर्नशिप एप्लीकेशन पर काम करें
+
+🎯 **सफलता की मानसिकता:**
+• "मैं महान चीजें हासिल कर सकता हूँ"
+• "चुनौतियां मुझे मजबूत बनाती हैं"
+• "मेरा भविष्य उज्ज्वल और अवसरों से भरा है"
+
+आप यहाँ हैं यही दिखाता है कि आप अपने भविष्य की परवाह करते हैं। यह पहले से ही जीत का रवैया है!
+
+आज हम किस लक्ष्य पर मिलकर काम कर सकते हैं, {user_name}?"""
+        else:
+            return f"""🚀 **Motivation Boost for {user_name}:**
+
+You've got this! Here's your personal pep talk:
+
+💪 **Remember Your Strength:**
+• You've overcome challenges before
+• Every small step counts toward your goals
+• Your potential is limitless
+
+🌟 **Today's Your Day To:**
+• Take one small action toward your dreams
+• Believe in yourself completely
+• Make progress on your PM Internship application
+
+🎯 **Success Mindset:**
+• "I am capable of achieving great things"
+• "Challenges help me grow stronger"
+• "My future is bright and full of opportunities"
+
+The fact that you're here shows you care about your future. That's already a winning attitude, {user_name}! 
+
+What goal can we work on together today?"""
+    
     # Technology questions
-    if any(word in message_lower for word in ['technology', 'tech', 'programming', 'coding', 'software', 'computer', 'ai', 'machine learning', 'data science']):
+    elif any(word in message_lower for word in ['technology', 'tech', 'programming', 'coding', 'software', 'computer', 'ai', 'machine learning', 'data science']):
         return f"""💻 **Tech Insights for {user_name}:**
 
 I can help with technology topics! While my primary expertise is PM Internship Scheme, I have general knowledge about:
@@ -838,9 +1138,146 @@ I can help with a wide range of topics! While I'm specialized in PM Internship S
 🌟 **I'm here to help you succeed in every way possible!**"""
 
 def get_fallback_response(message):
-    """Enhanced intelligent fallback responses with general knowledge"""
+    """Enhanced intelligent fallback responses with multilingual personal assistant capabilities"""
     message_lower = message.lower()
     user_name = session.get('user_name', 'there')
+    
+    # Detect language for multilingual responses
+    detected_lang = detect_user_language(message)
+    
+    # Personal assistant responses for common interactions - Multilingual
+    if any(phrase in message_lower for phrase in ['how are you', 'how r u', 'how do you do', 'what\'s up', 'whats up', 'कैसे हो', 'कैसे हैं', 'कसे आहात', 'कसा आहेस']):
+        if detected_lang == 'Hindi':  # Hindi
+            responses = [
+                f"मैं बहुत अच्छा हूँ, {user_name}! 😊 मैं यहाँ हूँ और आपकी हर तरह से मदद करने को तैयार हूँ। चाहे PM इंटर्नशिप के बारे में हो या कोई और बात, मैं सुनने को तैयार हूँ! आप कैसे हैं आज?",
+                f"मैं बहुत खुश हूँ, पूछने के लिए धन्यवाद {user_name}! 🌟 मैं उत्साहित हूँ और आपकी सहायता करने को तैयार हूँ। उम्मीद है आपका दिन शानदार जा रहा है! मैं कैसे मदद कर सकता हूँ?",
+                f"मैं फैंटास्टिक हूँ, {user_name}! 😄 हमेशा खुश रहता हूँ आपसे बात करके। मैं 24/7 यहाँ हूँ आपके सवालों का जवाब देने के लिए। आपका दिन कैसे बेहतर बना सकता हूँ?"
+            ]
+        elif detected_lang == 'Marathi':  # Marathi
+            responses = [
+                f"मी खूप चांगला आहे, {user_name}! 😊 मी इथे आहे आणि तुमची सर्व प्रकारे मदत करायला तयार आहे। PM इंटर्नशिप बद्दल असो किंवा इतर काहीही, मी ऐकायला तयार आहे! तुम्ही आज कसे आहात?",
+                f"मी खूप आनंदी आहे, विचारल्याबद्दल धन्यवाद {user_name}! 🌟 मी उत्साहित आहे आणि तुमची मदत करायला तयार आहे। आशा आहे तुमचा दिवस छान जात आहे! मी कशी मदत करू शकते?",
+                f"मी फंटास्टिक आहे, {user_name}! 😄 तुमच्याशी बोलायला नेहमी आनंद होतो। मी 24/7 इथे आहे तुमच्या प्रश्नांची उत्तरे देण्यासाठी। तुमचा दिवस कसा चांगला करू शकते?"
+            ]
+        else:  # English
+            responses = [
+                f"I'm doing great, {user_name}! 😊 I'm here and ready to help you with anything you need. Whether it's about PM Internships or just a friendly chat, I'm all ears! How are you doing today?",
+                f"I'm wonderful, thank you for asking {user_name}! 🌟 I'm energized and excited to assist you. I hope you're having an amazing day! What can I help you with?",
+                f"I'm fantastic, {user_name}! 😄 Always happy to chat with you. I'm here 24/7 ready to help with your questions, whether about internships or anything else. How can I brighten your day?"
+            ]
+        return random.choice(responses)
+    
+    elif any(phrase in message_lower for phrase in ['thank you', 'thanks', 'thank u', 'ty', 'appreciated', 'grateful', 'धन्यवाद', 'शुक्रिया', 'थैंक यू']):
+        if detected_lang == 'Hindi':  # Hindi
+            responses = [
+                f"आपका बहुत स्वागत है, {user_name}! 😊 मुझे खुशी हुई कि मैं मदद कर सका। यही तो मेरा काम है! कभी भी कुछ और पूछने में झिझक न करें।",
+                f"मेरी खुशी है, {user_name}! 🌟 मुझे बहुत अच्छा लगता है जब मैं आपकी मदद कर पाता हूँ। जब भी सहायता चाहिए, बेझिझक पूछिए!",
+                f"आपका पूरी तरह स्वागत है, {user_name}! 💫 आपकी मदद करना मुझे खुशी देता है। मैं हमेशा यहाँ हूँ जब आपको जरूरत हो!"
+            ]
+        elif detected_lang == 'Marathi':  # Marathi
+            responses = [
+                f"तुमचे खूप स्वागत आहे, {user_name}! 😊 मला आनंद झाला की मी मदत करू शकलो। हेच तर माझे काम आहे! कधीही काही विचारायला लाज वाटू नका।",
+                f"माझा आनंद आहे, {user_name}! 🌟 मला खूप बरे वाटते जेव्हा मी तुमची मदत करू शकतो। जेव्हा मदत लागेल, निसंकोच विचारा!",
+                f"तुमचे पूर्ण स्वागत आहे, {user_name}! 💫 तुमची मदत करणे मला आनंद देते। जेव्हा गरज असेल तेव्हा मी नेहमी इथे आहे!"
+            ]
+        else:  # English
+            responses = [
+                f"You're very welcome, {user_name}! 😊 I'm so happy I could help. That's what I'm here for! Feel free to ask me anything else anytime.",
+                f"My pleasure, {user_name}! 🌟 It makes me so glad to be helpful. Don't hesitate to reach out whenever you need assistance!",
+                f"You're absolutely welcome, {user_name}! 💫 Helping you brings me joy. I'm always here when you need me!"
+            ]
+        return random.choice(responses)
+    
+    elif any(phrase in message_lower for phrase in ['what can you do', 'what do you do', 'your capabilities', 'what are you', 'who are you']):
+        return f"""🤖 **Hi {user_name}! I'm PRIA, your personal AI assistant!**
+
+💫 **I'm here to be your helpful companion for:**
+
+🎯 **PM Internship Expertise:**
+• Complete guidance on applications, eligibility, benefits
+• Step-by-step support through the entire process
+• Document help and application tracking
+
+🌟 **Personal Assistant Services:**
+• Answer any general questions you have
+• Provide advice on career, education, technology
+• Offer motivation and life guidance
+• Help with daily queries and information
+
+💬 **Friendly Conversation:**
+• Chat about anything on your mind
+• Share interesting facts and knowledge
+• Provide encouragement and support
+
+🚀 **Available 24/7 to help you succeed!**
+
+What would you like to explore today, {user_name}?"""
+    
+    elif any(phrase in message_lower for phrase in ['good morning', 'good afternoon', 'good evening', 'good night']):
+        time_responses = {
+            'good morning': [
+                f"Good morning, {user_name}! ☀️ I hope you're starting your day with energy and positivity! What can I help you achieve today?",
+                f"A very good morning to you, {user_name}! 🌅 Ready to make today amazing? I'm here to support you in any way I can!"
+            ],
+            'good afternoon': [
+                f"Good afternoon, {user_name}! 🌞 I hope your day is going wonderfully! How can I assist you this afternoon?",
+                f"A lovely afternoon to you, {user_name}! ☀️ Hope you're having a productive day. What brings you here?"
+            ],
+            'good evening': [
+                f"Good evening, {user_name}! 🌆 I hope you've had a fantastic day! How can I help you this evening?",
+                f"Evening greetings, {user_name}! 🌅 Perfect time to wind down. What can I do for you?"
+            ],
+            'good night': [
+                f"Good night, {user_name}! 🌙 Sleep well and sweet dreams! I'll be here whenever you need me tomorrow!",
+                f"Wishing you a peaceful night, {user_name}! ✨ Rest well, and remember I'm always here when you need assistance!"
+            ]
+        }
+        
+        for greeting, responses in time_responses.items():
+            if greeting in message_lower:
+                return random.choice(responses)
+    
+    elif any(phrase in message_lower for phrase in ['i\'m sad', 'i am sad', 'feeling down', 'depressed', 'upset', 'not good']):
+        return f"""💙 I'm sorry to hear you're feeling down, {user_name}. 
+
+🤗 **Remember that it's okay to feel this way sometimes.** Here are some things that might help:
+
+✨ **Small Steps:**
+• Take a few deep breaths
+• Step outside for fresh air
+• Listen to your favorite music
+• Talk to someone you trust
+
+🌟 **Focus on Positives:**
+• Think of one thing you're grateful for
+• Remember your past achievements
+• Know that difficult times pass
+
+💪 **You're Stronger Than You Know:**
+• Every challenge makes you more resilient
+• You have overcome difficulties before
+• Tomorrow is a new opportunity
+
+🎯 **Career-wise:** The PM Internship could be a great step toward a brighter future!
+
+I'm here if you want to talk more, {user_name}. You're not alone! 💙"""
+    
+    elif any(phrase in message_lower for phrase in ['i\'m happy', 'i am happy', 'feeling great', 'excited', 'wonderful', 'fantastic']):
+        return f"""🎉 That's absolutely wonderful, {user_name}! Your happiness is contagious! 
+
+😊 **I love hearing that you're feeling great!** 
+
+✨ **Keep that positive energy flowing:**
+• Share your joy with others
+• Use this momentum for your goals
+• Remember this feeling for challenging times
+
+🚀 **With this positive attitude, you're unstoppable!** Perfect time to:
+• Work on your PM Internship application
+• Set new goals for yourself
+• Spread positivity to others
+
+🌟 **Keep shining, {user_name}! What's making you so happy today?**"""
     
     # First check for general knowledge topics
     general_response = get_enhanced_general_response(message, user_name)
